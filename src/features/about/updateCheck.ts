@@ -1,14 +1,14 @@
 import { getVersion } from "@tauri-apps/api/app";
+import { invoke } from "@tauri-apps/api/core";
 
-const LATEST_RELEASE_URL = "https://api.github.com/repos/Achilng/floral-notepaper/releases/latest";
 const RELEASES_URL = "https://github.com/Achilng/floral-notepaper/releases";
 
-interface GitHubRelease {
-  tag_name?: string;
-  html_url?: string;
-  name?: string;
-  body?: string;
-  published_at?: string;
+interface LatestReleaseResponse {
+  latestVersion?: string | null;
+  releaseUrl?: string;
+  releaseName?: string;
+  releaseNotes?: string;
+  publishedAt?: string | null;
 }
 
 export interface UpdateCheckResult {
@@ -54,24 +54,16 @@ export async function getCurrentAppVersion(): Promise<string> {
 
 export async function checkLatestRelease(): Promise<UpdateCheckResult> {
   const currentVersion = await getCurrentAppVersion();
-  const response = await fetch(LATEST_RELEASE_URL, {
-    headers: { Accept: "application/vnd.github+json" },
-  });
-
-  if (!response.ok) {
-    throw new Error(`GitHub release check failed: ${response.status}`);
-  }
-
-  const release = (await response.json()) as GitHubRelease;
-  const latestVersion = release.tag_name ?? null;
+  const release = await invoke<LatestReleaseResponse>("about_check_latest_release");
+  const latestVersion = release.latestVersion ?? null;
 
   return {
     currentVersion,
     latestVersion,
     updateAvailable: latestVersion ? isVersionNewer(latestVersion, currentVersion) : false,
-    releaseUrl: release.html_url || RELEASES_URL,
-    releaseName: release.name || latestVersion || "",
-    releaseNotes: release.body || "",
-    publishedAt: release.published_at || null,
+    releaseUrl: release.releaseUrl || RELEASES_URL,
+    releaseName: release.releaseName || latestVersion || "",
+    releaseNotes: release.releaseNotes || "",
+    publishedAt: release.publishedAt || null,
   };
 }

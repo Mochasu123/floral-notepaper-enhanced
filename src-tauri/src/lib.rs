@@ -4,13 +4,90 @@ pub mod services;
 
 use locales::Locale;
 use services::notes::{default_store, AppConfig, AppError, Note, NoteMetadata, SaveNoteRequest};
+use serde::Serialize;
 use std::path::PathBuf;
 use tauri::{AppHandle, Emitter};
+
+const RELEASES_URL: &str = "https://github.com/Achilng/floral-notepaper/releases";
+const RELEASE_TAG_PREFIX: &str = "/Achilng/floral-notepaper/releases/tag/";
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateCheckResult {
+    latest_version: Option<String>,
+    release_url: String,
+    release_name: String,
+    release_notes: String,
+    published_at: Option<String>,
+}
 
 #[tauri::command]
 fn app_name() -> Result<String, AppError> {
     let locale = Locale::from_tag(&default_store()?.load_config()?.locale);
     Ok(locales::app_name(locale).to_string())
+}
+
+#[tauri::command]
+async fn about_check_latest_release() -> Result<UpdateCheckResult, AppError> {
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 floral-notepaper-update-check/1.0")
+        .build()
+        .map_err(|error| AppError {
+            code: "updateCheck".into(),
+            message: error.to_string(),
+            details: Default::default(),
+        })?;
+
+    let response = client
+        .get(RELEASES_URL)
+        .send()
+        .await
+        .map_err(|error| AppError {
+            code: "updateCheck".into(),
+            message: error.to_string(),
+            details: Default::default(),
+        })?;
+
+    let status = response.status();
+    if !status.is_success() {
+        return Err(AppError {
+            code: "updateCheck".into(),
+            message: format!("GitHub release check failed: {status}"),
+            details: Default::default(),
+        });
+    }
+
+    let html = response.text().await.map_err(|error| AppError {
+        code: "updateCheck".into(),
+        message: error.to_string(),
+        details: Default::default(),
+    })?;
+    let latest_version = html.find(RELEASE_TAG_PREFIX).and_then(|index| {
+        let start = index + RELEASE_TAG_PREFIX.len();
+        let tag = html[start..]
+            .split(['"', '\'', '?', '#', '<', ' '])
+            .next()
+            .unwrap_or_default()
+            .trim_matches('/');
+        if tag.is_empty() {
+            None
+        } else {
+            Some(tag.to_string())
+        }
+    });
+    let release_url = latest_version
+        .as_ref()
+        .map(|tag| format!("{RELEASES_URL}/tag/{tag}"))
+        .unwrap_or_else(|| RELEASES_URL.to_string());
+    let release_name = latest_version.clone().unwrap_or_default();
+
+    Ok(UpdateCheckResult {
+        release_url,
+        release_name,
+        release_notes: String::new(),
+        published_at: None,
+        latest_version,
+    })
 }
 
 #[tauri::command]
@@ -233,6 +310,7 @@ pub fn run() {
         .on_window_event(desktop::handle_window_event)
         .invoke_handler(tauri::generate_handler![
             app_name,
+            about_check_latest_release,
             notes_list,
             notes_get,
             notes_create,
