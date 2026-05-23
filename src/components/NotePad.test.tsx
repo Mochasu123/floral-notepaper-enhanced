@@ -10,7 +10,8 @@ describe("NotePad surface modes", () => {
     expect(markup).toContain("bg-transparent p-0");
     expect(markup).not.toContain("bg-transparent p-1");
     expect(markup).toContain("app-surface-frame");
-    expect(markup).toContain("border-paper-deep/70");
+    expect(markup).toContain("border-2");
+    expect(markup).toContain("border-paper-deep");
     expect(markup.match(/data-surface-resize-handle="true"/g)).toHaveLength(4);
     expect(markup).toContain('data-resize-direction="NorthWest"');
     expect(markup).toContain('data-resize-direction="NorthEast"');
@@ -37,7 +38,7 @@ describe("NotePad surface modes", () => {
     expect(markup).not.toContain("bg-transparent p-1");
     expect(markup).toContain("app-surface-frame");
     expect(markup).toContain("background-color:#f6f3ec");
-    expect(markup).toContain("shadow-[0_1px_8px_rgba(26,26,24,0.04)]");
+    expect(markup).toContain("shadow-[0_12px_34px_rgba(26,26,24,0.18)]");
     expect(markup).toContain('data-tile-corner-mark="true"');
     expect(markup.match(/data-tile-corner-mark="true"/g)).toHaveLength(4);
     expect(markup.match(/data-surface-resize-handle="true"/g)).toHaveLength(4);

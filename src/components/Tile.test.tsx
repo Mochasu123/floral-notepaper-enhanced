@@ -11,12 +11,12 @@ describe("Tile", () => {
     expect(markup).toContain("app-surface-frame");
     expect(markup).toContain("background-color:#f6f3ec");
     expect(markup).not.toContain("bg-[#d8eee9]");
-    expect(markup).toContain("shadow-[0_1px_8px_rgba(26,26,24,0.04)]");
-    expect(markup).toContain("hover:shadow-[0_6px_24px_rgba(26,26,24,0.07)]");
+    expect(markup).toContain("shadow-[0_12px_34px_rgba(26,26,24,0.18)]");
+    expect(markup).toContain("hover:shadow-[0_16px_42px_rgba(26,26,24,0.22)]");
     expect(markup).not.toContain("hover:scale");
     expect(markup).not.toContain("scale(");
-    expect(markup).toContain("font-size:15px");
-    expect(markup).toContain("font-size:14px");
+    expect(markup).toContain("font-size:17px");
+    expect(markup).toContain("font-size:16px");
     expect(markup).toContain("leading-[1.8]");
     expect(markup).toContain(">读书笔记<");
     expect(markup).toContain("满地都是六便士");

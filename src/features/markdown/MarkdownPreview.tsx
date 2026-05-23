@@ -146,7 +146,7 @@ const components: Components = {
   ),
 };
 
-export function MarkdownPreview({ content, fontSize = 14 }: MarkdownPreviewProps) {
+export function MarkdownPreview({ content, fontSize = 16 }: MarkdownPreviewProps) {
   const { t } = useTranslation();
   return (
     <div className="font-body" style={{ fontSize: `${fontSize}px` }}>

@@ -973,11 +973,11 @@ fn default_theme() -> String {
 }
 
 fn default_font_size() -> u32 {
-    14
+    16
 }
 
 fn default_surface_font_size() -> u32 {
-    14
+    16
 }
 
 fn default_external_file_auto_save() -> bool {
@@ -1176,8 +1176,8 @@ mod tests {
         assert_eq!(loaded.tile_color_mode, "system");
         assert_eq!(loaded.theme, "system");
         assert_eq!(loaded.locale, "zh-CN");
-        assert_eq!(loaded.font_size, 14);
-        assert_eq!(loaded.surface_font_size, 14);
+        assert_eq!(loaded.font_size, 16);
+        assert_eq!(loaded.surface_font_size, 16);
     }
 
     #[cfg(target_os = "macos")]

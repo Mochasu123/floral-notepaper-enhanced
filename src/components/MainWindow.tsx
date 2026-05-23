@@ -1228,7 +1228,7 @@ export function MainWindow({
 
   return (
     <div className="w-full h-screen flex flex-col">
-      <div className="noise-bg bg-cloud overflow-hidden flex flex-col flex-1">
+      <div className="app-main-frame noise-bg bg-cloud overflow-hidden flex flex-col flex-1">
         <div
           className="flex items-center justify-between pl-5 pr-0 h-11 bg-paper/60 border-b border-paper-deep/30 shrink-0 select-none cursor-default"
           onMouseDown={handleTitleBarDrag}
@@ -2133,7 +2133,7 @@ export function MainWindow({
                             markDirty();
                           }}
                           className="w-full h-full leading-[1.9] text-ink-soft font-body placeholder:text-ink-ghost/40"
-                          style={{ fontSize: `${settingsConfig?.fontSize ?? 14}px` }}
+                          style={{ fontSize: `${settingsConfig?.fontSize ?? 16}px` }}
                           placeholder={t("main.editor.contentPlaceholder", {
                             defaultValue: "开始写作……",
                           })}
@@ -2180,7 +2180,7 @@ export function MainWindow({
                       >
                         <MarkdownPreview
                           content={content}
-                          fontSize={settingsConfig?.fontSize ?? 14}
+                          fontSize={settingsConfig?.fontSize ?? 16}
                         />
                       </div>
                     </div>

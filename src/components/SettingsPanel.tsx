@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useHotkeyRecorder } from "@tanstack/react-hotkeys";
 import { useTranslation } from "react-i18next";
+import {
+  checkLatestRelease,
+  getCurrentAppVersion,
+  type UpdateCheckResult,
+} from "../features/about/updateCheck";
 import { checkGlobalShortcut } from "../features/settings/api";
 import type { AppConfig, ThemeOption, TileColorMode, ViewMode } from "../features/settings/types";
 import {
@@ -25,6 +30,10 @@ interface SettingsPanelProps {
 
 export function SettingsPanel({ config, onChange, onChooseNotesDir, onClose }: SettingsPanelProps) {
   const { t } = useTranslation();
+  const [appVersion, setAppVersion] = useState(import.meta.env.VITE_APP_VERSION || "0.0.0");
+  const [updateState, setUpdateState] = useState<"idle" | "checking" | "checked" | "error">("idle");
+  const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
   const setConfigValue = <Key extends keyof AppConfig>(key: Key, value: AppConfig[Key]) => {
     onChange({ ...config, [key]: value });
   };
@@ -76,6 +85,30 @@ export function SettingsPanel({ config, onChange, onChooseNotesDir, onClose }: S
       })),
     [t],
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    void getCurrentAppVersion().then((version) => {
+      if (!cancelled) setAppVersion(version);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleCheckUpdates = async () => {
+    setUpdateState("checking");
+    setUpdateError(null);
+    try {
+      const result = await checkLatestRelease();
+      setAppVersion(result.currentVersion);
+      setUpdateResult(result);
+      setUpdateState("checked");
+    } catch (error) {
+      setUpdateError(error instanceof Error ? error.message : String(error));
+      setUpdateState("error");
+    }
+  };
 
   return (
     <aside className="w-[360px] h-full shrink-0 border-l border-paper-deep/30 bg-cloud/92 backdrop-blur-sm flex flex-col">
@@ -226,12 +259,12 @@ export function SettingsPanel({ config, onChange, onChooseNotesDir, onClose }: S
               min={8}
               max={30}
               step={1}
-              value={config.fontSize ?? 14}
+              value={config.fontSize ?? 16}
               onChange={(event) => setConfigValue("fontSize", Number(event.target.value))}
               className="flex-1 h-1 accent-bamboo cursor-pointer appearance-none bg-transparent [&::-webkit-slider-runnable-track]:h-[3px] [&::-webkit-slider-runnable-track]:rounded-full [&::-webkit-slider-runnable-track]:bg-paper-deep/50 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-bamboo [&::-webkit-slider-thumb]:-mt-[4.5px] [&::-webkit-slider-thumb]:shadow-[0_1px_3px_rgba(0,0,0,0.15)]"
             />
             <span className="text-[12px] font-mono text-ink-soft tabular-nums w-8 text-right">
-              {config.fontSize ?? 14}px
+              {config.fontSize ?? 16}px
             </span>
           </div>
         </section>
@@ -246,12 +279,12 @@ export function SettingsPanel({ config, onChange, onChooseNotesDir, onClose }: S
               min={8}
               max={30}
               step={1}
-              value={config.surfaceFontSize ?? 14}
+              value={config.surfaceFontSize ?? 16}
               onChange={(event) => setConfigValue("surfaceFontSize", Number(event.target.value))}
               className="flex-1 h-1 accent-bamboo cursor-pointer appearance-none bg-transparent [&::-webkit-slider-runnable-track]:h-[3px] [&::-webkit-slider-runnable-track]:rounded-full [&::-webkit-slider-runnable-track]:bg-paper-deep/50 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-bamboo [&::-webkit-slider-thumb]:-mt-[4.5px] [&::-webkit-slider-thumb]:shadow-[0_1px_3px_rgba(0,0,0,0.15)]"
             />
             <span className="text-[12px] font-mono text-ink-soft tabular-nums w-8 text-right">
-              {config.surfaceFontSize ?? 14}px
+              {config.surfaceFontSize ?? 16}px
             </span>
           </div>
         </section>
@@ -301,6 +334,72 @@ export function SettingsPanel({ config, onChange, onChooseNotesDir, onClose }: S
             value={config.defaultViewMode}
             onChange={(v) => setConfigValue("defaultViewMode", v)}
           />
+        </section>
+
+        <section className="space-y-2 pt-2 border-t border-paper-deep/25">
+          <div className="flex items-center justify-between">
+            <label className="block text-[11px] font-body text-ink-faint">
+              {t("settings.about.title", { defaultValue: "关于" })}
+            </label>
+            <span className="text-[11px] font-mono text-ink-soft tabular-nums">
+              v{appVersion}
+            </span>
+          </div>
+          <div className="rounded-lg border border-paper-deep/35 bg-paper-warm/35 px-3 py-2.5 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-[12px] text-ink-soft font-medium">
+                  {t("settings.about.appName", { defaultValue: "花笺" })}
+                </p>
+                <p className="text-[11px] text-ink-faint truncate">
+                  {updateResult?.releaseName ||
+                    t("settings.about.officialRepo", {
+                      defaultValue: "Achilng/floral-notepaper",
+                    })}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleCheckUpdates()}
+                disabled={updateState === "checking"}
+                className="h-8 px-3 rounded-lg border border-paper-deep/45 text-[11px] text-ink-faint hover:text-bamboo hover:bg-bamboo-mist/50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer whitespace-nowrap"
+              >
+                {updateState === "checking"
+                  ? t("settings.about.checking", { defaultValue: "检查中" })
+                  : t("settings.about.checkUpdates", { defaultValue: "检查更新" })}
+              </button>
+            </div>
+            {updateState === "checked" && updateResult && (
+              <div className="space-y-1">
+                <p
+                  className={`text-[11px] ${
+                    updateResult.updateAvailable ? "text-bamboo" : "text-ink-faint"
+                  }`}
+                >
+                  {updateResult.updateAvailable
+                    ? t("settings.about.updateAvailable", {
+                        version: updateResult.latestVersion,
+                        defaultValue: "发现新版本 {{version}}",
+                      })
+                    : t("settings.about.upToDate", { defaultValue: "当前已是最新版本" })}
+                </p>
+                <a
+                  href={updateResult.releaseUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex text-[11px] text-bamboo hover:text-bamboo-light underline underline-offset-2"
+                >
+                  {t("settings.about.openReleases", { defaultValue: "查看发布页" })}
+                </a>
+              </div>
+            )}
+            {updateState === "error" && (
+              <p className="text-[11px] text-red-400">
+                {t("settings.about.checkFailed", { defaultValue: "检查更新失败" })}
+                {updateError ? `: ${updateError}` : ""}
+              </p>
+            )}
+          </div>
         </section>
 
         <section className="pt-2 border-t border-paper-deep/25">

@@ -72,7 +72,7 @@ export function Tile({
   color = DEFAULT_TILE_COLOR,
   width = 260,
   rotation = 0,
-  fontSize = 14,
+  fontSize = 16,
   renderMarkdown = false,
   className = "",
   style,
@@ -100,7 +100,7 @@ export function Tile({
   return (
     <div
       {...divProps}
-      className={`app-surface-frame relative border overflow-hidden select-none shadow-[0_1px_8px_rgba(26,26,24,0.04)] hover:shadow-[0_6px_24px_rgba(26,26,24,0.07)] ${className}`}
+      className={`app-surface-frame relative border-2 border-paper-deep overflow-hidden select-none shadow-[0_12px_34px_rgba(26,26,24,0.18)] hover:shadow-[0_16px_42px_rgba(26,26,24,0.22)] ${className}`}
       style={mergedStyle}
     >
       <div className="px-4 pt-4 pb-4 h-full overflow-y-auto scrollbar-hidden">
