@@ -44,6 +44,8 @@ pub struct AppConfig {
     pub font_size: u32,
     #[serde(default = "default_surface_font_size")]
     pub surface_font_size: u32,
+    #[serde(default = "default_ui_font_size")]
+    pub ui_font_size: u32,
     #[serde(default = "default_external_file_auto_save")]
     pub external_file_auto_save: bool,
     #[serde(default = "default_remember_surface_size")]
@@ -360,9 +362,11 @@ impl NoteStore {
         self.ensure_storage()?;
         let id = Uuid::new_v4().to_string();
         let now = Utc::now();
-        let file_name = self.file_name_for(&id, &request.title);
-        let word_count = count_words(&request.content);
+        let mut metadata_file = self.load_metadata()?;
         let category = request.category.clone();
+        let file_name =
+            self.unique_file_name_for(&id, &request.title, &category, &metadata_file.notes);
+        let word_count = count_words(&request.content);
         let note_path = self.note_path_in_category(&file_name, &category);
         if let Some(parent) = note_path.parent() {
             fs::create_dir_all(parent)?;
@@ -379,7 +383,6 @@ impl NoteStore {
         };
 
         fs::write(&note_path, &request.content)?;
-        let mut metadata_file = self.load_metadata()?;
         metadata_file.notes.push(metadata.clone());
         self.save_metadata(&metadata_file)?;
 
@@ -398,16 +401,16 @@ impl NoteStore {
     pub fn update_note(&self, id: &str, request: SaveNoteRequest) -> Result<Note, AppError> {
         self.ensure_storage()?;
         let mut metadata_file = self.load_metadata()?;
-        let note = metadata_file
+        let note_index = metadata_file
             .notes
-            .iter_mut()
-            .find(|note| note.id == id)
+            .iter()
+            .position(|note| note.id == id)
             .ok_or_else(|| AppError::note_not_found(id))?;
+        let old_note = metadata_file.notes[note_index].clone();
 
-        let old_file_name = note.file_name.clone();
-        let old_category = note.category.clone();
-        let new_file_name = self.file_name_for(id, &request.title);
         let new_category = request.category.clone();
+        let new_file_name =
+            self.unique_file_name_for(id, &request.title, &new_category, &metadata_file.notes);
         let now = Utc::now();
         let word_count = count_words(&request.content);
 
@@ -417,14 +420,15 @@ impl NoteStore {
         }
         fs::write(&new_path, &request.content)?;
 
-        if old_file_name != new_file_name || old_category != new_category {
-            let old_path = self.note_path_in_category(&old_file_name, &old_category);
+        if old_note.file_name != new_file_name || old_note.category != new_category {
+            let old_path = self.note_path_in_category(&old_note.file_name, &old_note.category);
             if old_path.exists() && old_path != new_path {
                 trash::delete(&old_path)
                     .map_err(|e| AppError::new("trash", format!("移入回收站失败: {e}")))?;
             }
         }
 
+        let note = &mut metadata_file.notes[note_index];
         note.title = request.title;
         note.file_name = new_file_name.clone();
         note.category = new_category.clone();
@@ -610,19 +614,22 @@ impl NoteStore {
     ) -> Result<NoteMetadata, AppError> {
         self.ensure_storage()?;
         let mut metadata_file = self.load_metadata()?;
-        let note = metadata_file
+        let note_index = metadata_file
             .notes
-            .iter_mut()
-            .find(|note| note.id == id)
+            .iter()
+            .position(|note| note.id == id)
             .ok_or_else(|| AppError::note_not_found(id))?;
+        let current_note = metadata_file.notes[note_index].clone();
 
-        let old_category = note.category.clone();
+        let old_category = current_note.category.clone();
         if old_category == new_category {
-            return Ok(note.clone());
+            return Ok(current_note);
         }
 
-        let old_path = self.note_path_in_category(&note.file_name, &old_category);
-        let new_path = self.note_path_in_category(&note.file_name, new_category);
+        let new_file_name =
+            self.unique_file_name_for(id, &current_note.title, new_category, &metadata_file.notes);
+        let old_path = self.note_path_in_category(&current_note.file_name, &old_category);
+        let new_path = self.note_path_in_category(&new_file_name, new_category);
         if let Some(parent) = new_path.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -630,6 +637,8 @@ impl NoteStore {
             fs::rename(&old_path, &new_path)?;
         }
 
+        let note = &mut metadata_file.notes[note_index];
+        note.file_name = new_file_name;
         note.category = new_category.to_string();
         let result = note.clone();
         self.save_metadata(&metadata_file)?;
@@ -654,6 +663,7 @@ impl NoteStore {
             theme: default_theme(),
             font_size: default_font_size(),
             surface_font_size: default_surface_font_size(),
+            ui_font_size: default_ui_font_size(),
             external_file_auto_save: default_external_file_auto_save(),
             remember_surface_size: default_remember_surface_size(),
             tile_ctrl_close: default_tile_ctrl_close(),
@@ -736,13 +746,42 @@ impl NoteStore {
             .ok_or_else(|| AppError::note_not_found(id))
     }
 
-    fn file_name_for(&self, id: &str, title: &str) -> String {
+    fn unique_file_name_for(
+        &self,
+        id: &str,
+        title: &str,
+        category: &str,
+        notes: &[NoteMetadata],
+    ) -> String {
         let safe_title = safe_file_stem(title);
-        if safe_title.is_empty() {
-            format!("{id}.md")
+        let base = if safe_title.is_empty() {
+            id.to_string()
         } else {
-            format!("{id}_{safe_title}.md")
+            format!("{safe_title}__{id}")
+        };
+
+        for index in 0..1000 {
+            let file_name = if index == 0 {
+                format!("{base}.md")
+            } else {
+                format!("{base}-{}.md", index + 1)
+            };
+            let used_by_other_note = notes.iter().any(|note| {
+                note.id != id && note.category == category && note.file_name == file_name
+            });
+            let used_by_this_note = notes.iter().any(|note| {
+                note.id == id && note.category == category && note.file_name == file_name
+            });
+            let path = self.note_path_in_category(&file_name, category);
+            if used_by_this_note {
+                return file_name;
+            }
+            if !used_by_other_note && !path.exists() {
+                return file_name;
+            }
         }
+
+        format!("{id}.md")
     }
 
     fn load_metadata(&self) -> Result<MetadataFile, AppError> {
@@ -903,6 +942,11 @@ fn preview(content: &str) -> String {
 
 fn id_from_file_name(file_name: &str) -> Option<String> {
     let stem = file_name.strip_suffix(".md")?;
+    if let Some((_, id)) = stem.rsplit_once("__") {
+        if looks_like_uuid(id) {
+            return Some(id.to_string());
+        }
+    }
     Some(
         stem.split_once('_')
             .map(|(id, _)| id.to_string())
@@ -920,9 +964,22 @@ fn infer_title(file_name: &str, content: &str) -> String {
     }
 
     let stem = file_name.strip_suffix(".md").unwrap_or(file_name);
-    stem.split_once('_')
-        .map(|(_, title)| title.replace('_', " "))
-        .unwrap_or_default()
+    if let Some((title, id)) = stem.rsplit_once("__") {
+        if looks_like_uuid(id) {
+            return title.replace('_', " ");
+        }
+    }
+    if let Some((_, title)) = stem.split_once('_') {
+        title.replace('_', " ")
+    } else if looks_like_uuid(stem) {
+        String::new()
+    } else {
+        stem.replace('_', " ")
+    }
+}
+
+fn looks_like_uuid(value: &str) -> bool {
+    value.len() == 36 && value.chars().all(|ch| ch == '-' || ch.is_ascii_hexdigit())
 }
 
 fn is_markdown_path(path: &Path) -> bool {
@@ -958,6 +1015,10 @@ fn default_note_auto_save() -> bool {
 
 fn default_note_surface_auto_save() -> bool {
     true
+}
+
+fn default_ui_font_size() -> u32 {
+    12
 }
 
 fn default_tile_color() -> String {
@@ -1132,6 +1193,7 @@ mod tests {
             theme: "dark".into(),
             font_size: 16,
             surface_font_size: 16,
+            ui_font_size: 12,
             external_file_auto_save: true,
             remember_surface_size: true,
             tile_ctrl_close: true,
@@ -1178,6 +1240,7 @@ mod tests {
         assert_eq!(loaded.locale, "zh-CN");
         assert_eq!(loaded.font_size, 16);
         assert_eq!(loaded.surface_font_size, 16);
+        assert_eq!(loaded.ui_font_size, 12);
     }
 
     #[cfg(target_os = "macos")]

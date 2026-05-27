@@ -16,6 +16,7 @@ const config = {
   theme: "light" as const,
   fontSize: 14,
   surfaceFontSize: 14,
+  uiFontSize: 12,
   externalFileAutoSave: true,
   rememberSurfaceSize: true,
   tileCtrlClose: true,

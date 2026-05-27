@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { MouseEvent } from "react";
+import type { CSSProperties, MouseEvent } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { emit, listen } from "@tauri-apps/api/event";
@@ -72,6 +72,11 @@ interface CategoryMenuState {
   x: number;
   y: number;
   category: string;
+}
+
+interface CategoryImportState {
+  category: string;
+  selectedIds: Set<string>;
 }
 
 type FormatAction =
@@ -308,6 +313,8 @@ export function MainWindow({
   const [showCategoryInput, setShowCategoryInput] = useState(false);
   const [categoryInputValue, setCategoryInputValue] = useState("");
   const [noteMenuMode, setNoteMenuMode] = useState<"main" | "move">("main");
+  const [selectedNoteIds, setSelectedNoteIds] = useState<Set<string>>(new Set());
+  const [categoryImport, setCategoryImport] = useState<CategoryImportState | null>(null);
   const [renamingCategory, setRenamingCategory] = useState<string | null>(null);
   const [renameCategoryValue, setRenameCategoryValue] = useState("");
   const [dragOverCategory, setDragOverCategory] = useState<string | null>(null);
@@ -322,6 +329,7 @@ export function MainWindow({
   const contentRef = useRef<HTMLTextAreaElement>(null);
   const externalFileMtimeRef = useRef<number>(0);
   const lastExternalSaveRef = useRef<number>(0);
+  const ignoreNextNotesChangedRef = useRef(false);
   const saveStateRef = useRef(saveState);
   saveStateRef.current = saveState;
 
@@ -445,6 +453,12 @@ export function MainWindow({
     () => groupNotesByCategory(filteredNotes, categories),
     [filteredNotes, categories],
   );
+  const uncategorizedNotes = useMemo(() => notes.filter((note) => !note.category), [notes]);
+  const uiFontSize = settingsConfig?.uiFontSize ?? 12;
+  const appFrameStyle = useMemo(
+    () => ({ "--ui-font-size": `${uiFontSize}px` }) as CSSProperties,
+    [uiFontSize],
+  );
 
   const lineCount = useMemo(() => content.split("\n").length, [content]);
   const byteSize = useMemo(
@@ -452,6 +466,14 @@ export function MainWindow({
     [content],
   );
   const charCount = useMemo(() => countNoteChars(content), [content]);
+
+  useEffect(() => {
+    const existingIds = new Set(notes.map((note) => note.id));
+    setSelectedNoteIds((current) => {
+      const next = new Set([...current].filter((id) => existingIds.has(id)));
+      return next.size === current.size ? current : next;
+    });
+  }, [notes]);
 
   const applyNote = useCallback((note: Note) => {
     setSelectedId(note.id);
@@ -571,6 +593,10 @@ export function MainWindow({
 
   useEffect(() => {
     const unlisten = listen("notes-changed", () => {
+      if (ignoreNextNotesChangedRef.current) {
+        ignoreNextNotesChangedRef.current = false;
+        return;
+      }
       void refreshNotes().then((loaded) => {
         if (!selectedId) return;
         const stillExists = loaded.some((n) => n.id === selectedId);
@@ -790,11 +816,17 @@ export function MainWindow({
   const handleNewNote = async () => {
     setErrorMessage(null);
     try {
+      ignoreNextNotesChangedRef.current = true;
       const note = await createNote({ title: "", content: "", category: activeCategory });
       replaceNoteMetadata(note);
       applyNote(note);
     } catch (error) {
+      ignoreNextNotesChangedRef.current = false;
       setErrorMessage(getErrorMessage(error));
+    } finally {
+      window.setTimeout(() => {
+        ignoreNextNotesChangedRef.current = false;
+      }, 500);
     }
   };
 
@@ -887,13 +919,22 @@ export function MainWindow({
         if (!saved) return;
       }
 
+      ignoreNextNotesChangedRef.current = true;
       const note = await importMarkdownNote(activeCategory);
-      if (!note) return;
+      if (!note) {
+        ignoreNextNotesChangedRef.current = false;
+        return;
+      }
 
       replaceNoteMetadata(note);
       applyNote(note);
     } catch (error) {
+      ignoreNextNotesChangedRef.current = false;
       setErrorMessage(getErrorMessage(error));
+    } finally {
+      window.setTimeout(() => {
+        ignoreNextNotesChangedRef.current = false;
+      }, 500);
     }
   };
 
@@ -1038,9 +1079,68 @@ export function MainWindow({
   const handleMoveNote = async (noteId: string, targetCategory: string) => {
     setNoteMenuClosing(true);
     setErrorMessage(null);
+    const idsToMove =
+      selectedNoteIds.has(noteId) && selectedNoteIds.size > 1
+        ? Array.from(selectedNoteIds)
+        : [noteId];
     try {
-      await moveNoteCategory(noteId, targetCategory);
+      await Promise.all(idsToMove.map((id) => moveNoteCategory(id, targetCategory)));
       await refreshNotes();
+      setSelectedNoteIds(new Set());
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error));
+    }
+  };
+
+  const toggleNoteSelection = (noteId: string) => {
+    setSelectedNoteIds((current) => {
+      const next = new Set(current);
+      if (next.has(noteId)) {
+        next.delete(noteId);
+      } else {
+        next.add(noteId);
+      }
+      return next;
+    });
+  };
+
+  const handleNoteListClick = (event: MouseEvent<HTMLElement>, noteId: string) => {
+    if (event.ctrlKey || event.metaKey) {
+      event.preventDefault();
+      toggleNoteSelection(noteId);
+      return;
+    }
+    void handleSelectNote(noteId);
+  };
+
+  const openCategoryImport = (category: string) => {
+    setCategoryImport({ category, selectedIds: new Set() });
+  };
+
+  const toggleCategoryImportSelection = (noteId: string) => {
+    setCategoryImport((current) => {
+      if (!current) return current;
+      const selectedIds = new Set(current.selectedIds);
+      if (selectedIds.has(noteId)) {
+        selectedIds.delete(noteId);
+      } else {
+        selectedIds.add(noteId);
+      }
+      return { ...current, selectedIds };
+    });
+  };
+
+  const handleConfirmCategoryImport = async () => {
+    if (!categoryImport || categoryImport.selectedIds.size === 0) return;
+    setErrorMessage(null);
+    try {
+      await Promise.all(
+        Array.from(categoryImport.selectedIds).map((id) =>
+          moveNoteCategory(id, categoryImport.category),
+        ),
+      );
+      await refreshNotes();
+      setCategoryImport(null);
     } catch (error) {
       setErrorMessage(getErrorMessage(error));
     }
@@ -1228,7 +1328,10 @@ export function MainWindow({
 
   return (
     <div className="w-full h-screen flex flex-col">
-      <div className="app-main-frame noise-bg bg-cloud overflow-hidden flex flex-col flex-1">
+      <div
+        className="app-main-frame noise-bg bg-cloud overflow-hidden flex flex-col flex-1"
+        style={appFrameStyle}
+      >
         <div
           className="flex items-center justify-between pl-5 pr-0 h-11 bg-paper/60 border-b border-paper-deep/30 shrink-0 select-none cursor-default"
           onMouseDown={handleTitleBarDrag}
@@ -1500,6 +1603,24 @@ export function MainWindow({
               </div>
             )}
 
+            {selectedNoteIds.size > 0 && (
+              <div className="mx-3 mb-2 px-2.5 py-2 rounded-lg bg-bamboo-mist/70 border border-bamboo/20 text-ink-faint flex items-center justify-between gap-2">
+                <span className="text-[11px] font-body">
+                  {t("main.sidebar.selectedNotes", {
+                    count: selectedNoteIds.size,
+                    defaultValue: "已选择 {{count}} 篇",
+                  })}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedNoteIds(new Set())}
+                  className="text-[11px] text-bamboo hover:text-bamboo-light cursor-pointer"
+                >
+                  {t("common.cancel", { defaultValue: "取消" })}
+                </button>
+              </div>
+            )}
+
             <div className="flex-1 overflow-y-auto px-2 pb-2">
               <div className="space-y-0.5">
                 {externalFiles.length > 0 && (
@@ -1613,6 +1734,7 @@ export function MainWindow({
                         {group.notes.map((note) => {
                           const isSelected = note.id === selectedId;
                           const isHovered = note.id === hoveredId;
+                          const isBatchSelected = selectedNoteIds.has(note.id);
                           return (
                             <div
                               key={note.id}
@@ -1621,12 +1743,12 @@ export function MainWindow({
                                 e.dataTransfer.setData("text/plain", note.id);
                                 e.dataTransfer.effectAllowed = "move";
                               }}
-                              onClick={() => void handleSelectNote(note.id)}
+                              onClick={(event) => handleNoteListClick(event, note.id)}
                               onContextMenu={(event) => handleOpenNoteMenu(event, note.id)}
                               onMouseEnter={() => setHoveredId(note.id)}
                               onMouseLeave={() => setHoveredId(null)}
                               className={`w-full text-left rounded-xl px-3 py-2.5 transition-all duration-[600ms] cursor-pointer group relative ${
-                                isSelected
+                                isSelected || isBatchSelected
                                   ? "bg-bamboo-mist/70"
                                   : isHovered
                                     ? "bg-paper-warm/70"
@@ -1639,8 +1761,16 @@ export function MainWindow({
                                 }`}
                               />
                               <div className="flex items-baseline justify-between mb-0.5">
+                                <input
+                                  type="checkbox"
+                                  checked={isBatchSelected}
+                                  onChange={() => toggleNoteSelection(note.id)}
+                                  onClick={(event) => event.stopPropagation()}
+                                  className="mr-2 translate-y-[1px] accent-bamboo cursor-pointer"
+                                  title={t("main.sidebar.multiSelect", { defaultValue: "多选" })}
+                                />
                                 <span
-                                  className={`text-[13px] font-display font-medium truncate pr-2 transition-colors ${
+                                  className={`min-w-0 flex-1 text-[13px] font-display font-medium truncate pr-2 transition-colors ${
                                     isSelected ? "text-bamboo" : "text-ink-soft"
                                   }`}
                                 >
@@ -1755,6 +1885,28 @@ export function MainWindow({
                         <span className="text-[9px] text-bamboo/40 font-mono ml-auto shrink-0">
                           {group.notes.length}
                         </span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openCategoryImport(group.category);
+                          }}
+                          className="w-5 h-5 flex items-center justify-center rounded-md text-bamboo/45 hover:text-bamboo hover:bg-bamboo-mist/70 transition-all cursor-pointer opacity-70 group-hover/cat:opacity-100"
+                          title={t("main.category.addExisting", { defaultValue: "加入未分类笔记" })}
+                        >
+                          <svg
+                            width="12"
+                            height="12"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2.4"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <path d="M12 5v14M5 12h14" />
+                          </svg>
+                        </button>
                       </div>
 
                       <div className={`category-body ${isCollapsed ? "" : "expanded"}`}>
@@ -1785,6 +1937,7 @@ export function MainWindow({
                             group.notes.map((note) => {
                               const isSelected = note.id === selectedId;
                               const isHovered = note.id === hoveredId;
+                              const isBatchSelected = selectedNoteIds.has(note.id);
 
                               return (
                                 <div
@@ -1794,12 +1947,12 @@ export function MainWindow({
                                     e.dataTransfer.setData("text/plain", note.id);
                                     e.dataTransfer.effectAllowed = "move";
                                   }}
-                                  onClick={() => void handleSelectNote(note.id)}
+                                  onClick={(event) => handleNoteListClick(event, note.id)}
                                   onContextMenu={(event) => handleOpenNoteMenu(event, note.id)}
                                   onMouseEnter={() => setHoveredId(note.id)}
                                   onMouseLeave={() => setHoveredId(null)}
                                   className={`w-full text-left rounded-lg mx-1 px-2.5 py-2 transition-all duration-[600ms] cursor-pointer group relative ${
-                                    isSelected
+                                    isSelected || isBatchSelected
                                       ? "bg-bamboo-mist/70"
                                       : isHovered
                                         ? "bg-paper-warm/70"
@@ -1814,8 +1967,16 @@ export function MainWindow({
                                   />
 
                                   <div className="flex items-baseline justify-between mb-0.5">
+                                    <input
+                                      type="checkbox"
+                                      checked={isBatchSelected}
+                                      onChange={() => toggleNoteSelection(note.id)}
+                                      onClick={(event) => event.stopPropagation()}
+                                      className="mr-2 translate-y-[1px] accent-bamboo cursor-pointer"
+                                      title={t("main.sidebar.multiSelect", { defaultValue: "多选" })}
+                                    />
                                     <span
-                                      className={`text-[13px] font-display font-medium truncate pr-2 transition-colors ${
+                                      className={`min-w-0 flex-1 text-[13px] font-display font-medium truncate pr-2 transition-colors ${
                                         isSelected ? "text-bamboo" : "text-ink-soft"
                                       }`}
                                     >
@@ -2100,7 +2261,7 @@ export function MainWindow({
                       className="flex flex-col min-h-0 shrink-0"
                       style={{ width: viewMode === "split" ? `${splitRatio * 100}%` : "100%" }}
                     >
-                      <div className="flex items-center gap-0.5 px-4 pt-2 pb-1 shrink-0">
+                      <div className="main-editor-toolbar flex items-center gap-0.5 px-4 pt-2 pb-1 shrink-0">
                         {toolbarButtons.map((button) => (
                           <button
                             key={button.label}
@@ -2231,6 +2392,82 @@ export function MainWindow({
           )}
         </div>
       </div>
+      {categoryImport && (
+        <div
+          className="fixed inset-0 z-[9998] flex items-center justify-center bg-ink/10 backdrop-blur-[2px]"
+          onMouseDown={() => setCategoryImport(null)}
+        >
+          <div
+            className="w-[360px] max-h-[70vh] flex flex-col rounded-xl bg-cloud border border-paper-deep/60 shadow-[0_18px_50px_rgba(26,26,24,0.18)] overflow-hidden"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="px-4 py-3 border-b border-paper-deep/30">
+              <div className="text-[13px] font-display font-semibold text-ink">
+                {t("main.category.importExistingTitle", {
+                  category: categoryImport.category,
+                  defaultValue: "加入到「{{category}}」",
+                })}
+              </div>
+              <div className="mt-1 text-[11px] text-ink-ghost">
+                {t("main.category.importExistingHint", {
+                  defaultValue: "只显示未分类笔记，已在其他文件夹里的笔记不会出现在这里。",
+                })}
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto p-2">
+              {uncategorizedNotes.length === 0 ? (
+                <div className="px-3 py-8 text-center text-[12px] text-ink-ghost">
+                  {t("main.category.noImportCandidates", { defaultValue: "没有可加入的未分类笔记" })}
+                </div>
+              ) : (
+                uncategorizedNotes.map((note) => {
+                  const checked = categoryImport.selectedIds.has(note.id);
+                  return (
+                    <label
+                      key={note.id}
+                      className={`flex items-start gap-2 px-3 py-2 rounded-lg cursor-pointer transition-colors ${
+                        checked ? "bg-bamboo-mist/70" : "hover:bg-paper-warm/70"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleCategoryImportSelection(note.id)}
+                        className="mt-1 accent-bamboo cursor-pointer"
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-[13px] text-ink-soft font-medium truncate">
+                          {getDisplayTitle(note, t)}
+                        </span>
+                        <span className="block mt-0.5 text-[11px] text-ink-ghost truncate">
+                          {note.preview || t("common.blankNote", { defaultValue: "空白笔记" })}
+                        </span>
+                      </span>
+                    </label>
+                  );
+                })
+              )}
+            </div>
+            <div className="px-4 py-3 border-t border-paper-deep/30 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setCategoryImport(null)}
+                className="px-3 h-8 rounded-lg text-[12px] text-ink-faint hover:bg-paper-warm transition-colors cursor-pointer"
+              >
+                {t("common.cancel", { defaultValue: "取消" })}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleConfirmCategoryImport()}
+                disabled={categoryImport.selectedIds.size === 0}
+                className="px-3 h-8 rounded-lg text-[12px] text-cloud bg-bamboo hover:bg-bamboo-light disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              >
+                {t("common.confirm", { defaultValue: "确定" })}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {noteMenu && noteMenuTarget && (
         <div
           className={`fixed z-[9999] min-w-[168px] py-1.5 bg-cloud/95 backdrop-blur-sm border border-paper-deep/50 rounded-lg overflow-hidden select-none ${noteMenuClosing ? "animate-menu-exit" : "animate-menu-enter"}`}
