@@ -313,6 +313,7 @@ export function MainWindow({
   const [showCategoryInput, setShowCategoryInput] = useState(false);
   const [categoryInputValue, setCategoryInputValue] = useState("");
   const [noteMenuMode, setNoteMenuMode] = useState<"main" | "move">("main");
+  const [multiSelectMode, setMultiSelectMode] = useState(false);
   const [selectedNoteIds, setSelectedNoteIds] = useState<Set<string>>(new Set());
   const [categoryImport, setCategoryImport] = useState<CategoryImportState | null>(null);
   const [renamingCategory, setRenamingCategory] = useState<string | null>(null);
@@ -474,6 +475,12 @@ export function MainWindow({
       return next.size === current.size ? current : next;
     });
   }, [notes]);
+
+  useEffect(() => {
+    if (!multiSelectMode) {
+      setSelectedNoteIds(new Set());
+    }
+  }, [multiSelectMode]);
 
   const applyNote = useCallback((note: Note) => {
     setSelectedId(note.id);
@@ -1005,16 +1012,24 @@ export function MainWindow({
   };
 
   const handleDeleteNote = async (noteId = selectedId) => {
-    if (!noteId) return;
+    const idsToDelete =
+      multiSelectMode && selectedNoteIds.size > 0
+        ? Array.from(selectedNoteIds)
+        : noteId
+          ? [noteId]
+          : [];
+    if (idsToDelete.length === 0) return;
 
     setDeleteConfirm(false);
     setErrorMessage(null);
     try {
-      await deleteNote(noteId);
+      await Promise.all(idsToDelete.map((id) => deleteNote(id)));
       const remaining = await refreshNotes();
-      if (noteId === selectedId && remaining[0]) {
+      setSelectedNoteIds(new Set());
+      setMultiSelectMode(false);
+      if (selectedId && idsToDelete.includes(selectedId) && remaining[0]) {
         await loadNote(remaining[0].id);
-      } else if (noteId === selectedId) {
+      } else if (selectedId && idsToDelete.includes(selectedId)) {
         clearCurrentNote();
       }
     } catch (error) {
@@ -1080,13 +1095,14 @@ export function MainWindow({
     setNoteMenuClosing(true);
     setErrorMessage(null);
     const idsToMove =
-      selectedNoteIds.has(noteId) && selectedNoteIds.size > 1
+      multiSelectMode && selectedNoteIds.has(noteId) && selectedNoteIds.size > 1
         ? Array.from(selectedNoteIds)
         : [noteId];
     try {
       await Promise.all(idsToMove.map((id) => moveNoteCategory(id, targetCategory)));
       await refreshNotes();
       setSelectedNoteIds(new Set());
+      setMultiSelectMode(false);
     } catch (error) {
       setErrorMessage(getErrorMessage(error));
     }
@@ -1105,7 +1121,7 @@ export function MainWindow({
   };
 
   const handleNoteListClick = (event: MouseEvent<HTMLElement>, noteId: string) => {
-    if (event.ctrlKey || event.metaKey) {
+    if (multiSelectMode || event.ctrlKey || event.metaKey) {
       event.preventDefault();
       toggleNoteSelection(noteId);
       return;
@@ -1551,7 +1567,8 @@ export function MainWindow({
             </div>
 
             <div className="flex items-center justify-between px-5 pb-1.5 shrink-0">
-              <span className="text-[10px] text-ink-ghost font-mono tracking-wider uppercase">
+              <div className="min-w-0 flex items-center gap-2">
+                <span className="text-[10px] text-ink-ghost font-mono tracking-wider uppercase truncate">
                 {t("common.noteCount", {
                   count: filteredNotes.length,
                   defaultValue: "{{count}} 篇笔记",
@@ -1562,7 +1579,22 @@ export function MainWindow({
                       defaultValue: "{{count}} 个外部文件",
                     })}`
                   : ""}
-              </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setMultiSelectMode((enabled) => !enabled)}
+                  className={`px-1.5 h-5 rounded-md text-[10px] transition-colors cursor-pointer ${
+                    multiSelectMode
+                      ? "text-cloud bg-bamboo"
+                      : "text-ink-ghost hover:text-bamboo hover:bg-bamboo-mist/60"
+                  }`}
+                  title={t("main.sidebar.multiSelect", { defaultValue: "多选" })}
+                >
+                  {multiSelectMode
+                    ? t("common.done", { defaultValue: "完成" })
+                    : t("main.sidebar.multiSelect", { defaultValue: "多选" })}
+                </button>
+              </div>
               <button
                 onClick={() => setShowCategoryInput(true)}
                 className="text-[10px] text-ink-ghost hover:text-bamboo transition-colors cursor-pointer"
@@ -1603,7 +1635,7 @@ export function MainWindow({
               </div>
             )}
 
-            {selectedNoteIds.size > 0 && (
+            {multiSelectMode && selectedNoteIds.size > 0 && (
               <div className="mx-3 mb-2 px-2.5 py-2 rounded-lg bg-bamboo-mist/70 border border-bamboo/20 text-ink-faint flex items-center justify-between gap-2">
                 <span className="text-[11px] font-body">
                   {t("main.sidebar.selectedNotes", {
@@ -1613,7 +1645,10 @@ export function MainWindow({
                 </span>
                 <button
                   type="button"
-                  onClick={() => setSelectedNoteIds(new Set())}
+                  onClick={() => {
+                    setSelectedNoteIds(new Set());
+                    setMultiSelectMode(false);
+                  }}
                   className="text-[11px] text-bamboo hover:text-bamboo-light cursor-pointer"
                 >
                   {t("common.cancel", { defaultValue: "取消" })}
@@ -1761,14 +1796,16 @@ export function MainWindow({
                                 }`}
                               />
                               <div className="flex items-baseline justify-between mb-0.5">
-                                <input
-                                  type="checkbox"
-                                  checked={isBatchSelected}
-                                  onChange={() => toggleNoteSelection(note.id)}
-                                  onClick={(event) => event.stopPropagation()}
-                                  className="mr-2 translate-y-[1px] accent-bamboo cursor-pointer"
-                                  title={t("main.sidebar.multiSelect", { defaultValue: "多选" })}
-                                />
+                                {multiSelectMode && (
+                                  <input
+                                    type="checkbox"
+                                    checked={isBatchSelected}
+                                    onChange={() => toggleNoteSelection(note.id)}
+                                    onClick={(event) => event.stopPropagation()}
+                                    className="mr-2 translate-y-[1px] accent-bamboo cursor-pointer"
+                                    title={t("main.sidebar.multiSelect", { defaultValue: "多选" })}
+                                  />
+                                )}
                                 <span
                                   className={`min-w-0 flex-1 text-[13px] font-display font-medium truncate pr-2 transition-colors ${
                                     isSelected ? "text-bamboo" : "text-ink-soft"
@@ -1967,14 +2004,18 @@ export function MainWindow({
                                   />
 
                                   <div className="flex items-baseline justify-between mb-0.5">
-                                    <input
-                                      type="checkbox"
-                                      checked={isBatchSelected}
-                                      onChange={() => toggleNoteSelection(note.id)}
-                                      onClick={(event) => event.stopPropagation()}
-                                      className="mr-2 translate-y-[1px] accent-bamboo cursor-pointer"
-                                      title={t("main.sidebar.multiSelect", { defaultValue: "多选" })}
-                                    />
+                                    {multiSelectMode && (
+                                      <input
+                                        type="checkbox"
+                                        checked={isBatchSelected}
+                                        onChange={() => toggleNoteSelection(note.id)}
+                                        onClick={(event) => event.stopPropagation()}
+                                        className="mr-2 translate-y-[1px] accent-bamboo cursor-pointer"
+                                        title={t("main.sidebar.multiSelect", {
+                                          defaultValue: "多选",
+                                        })}
+                                      />
+                                    )}
                                     <span
                                       className={`min-w-0 flex-1 text-[13px] font-display font-medium truncate pr-2 transition-colors ${
                                         isSelected ? "text-bamboo" : "text-ink-soft"

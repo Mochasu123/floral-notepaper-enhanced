@@ -1,95 +1,81 @@
-<!-- markdownlint-disable -->
+# 花笺 Floral Notepaper - Personal Enhanced Build
 
-<div align="center">
+这是一个基于 [Achilng/floral-notepaper](https://github.com/Achilng/floral-notepaper) 的个人增强版本。原项目采用 MIT License，本仓库继续保留原项目许可与来源说明。
 
-<img src="./src-tauri/icons/icon.png" width="120" alt="花笺图标">
+这个版本不是官方版本，主要是为个人本地使用做的体验增强：侧栏笔记多了文件夹管理，编辑器交互更接近常规桌面软件，并补了一些自己使用时遇到的细节问题。
 
-# 花笺 Floral Notepaper
+## 为什么做这个版本
 
-轻量、优雅、现代化的本地便签工具<br>
-基于 Tauri 2 + React 构建
+原版已经足够轻量、好用，但在笔记数量变多以后，侧栏平铺列表不太方便管理；另外正文右键复制粘贴、窗口边界、默认字号、更新检查、文件命名等细节，更适合按照自己的使用习惯调一下。
 
-[繁體中文](README_zh-HK.md) · [English](README_en-US.md)<br>
-[反馈问题](https://github.com/Achilng/floral-notepaper/issues) · [更新日志](https://github.com/Achilng/floral-notepaper/releases)
+所以这个仓库的目标不是重写花笺，而是在尽量保留官方代码结构的前提下，维护一组本地需求，方便之后继续合并官方更新。
 
-[![Version](https://img.shields.io/github/v/release/Achilng/floral-notepaper)](https://github.com/Achilng/floral-notepaper/releases/latest)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-![Stars](https://img.shields.io/github/stars/Achilng/floral-notepaper?color=ffcb47&labelColor=black)</br>
-![React 19](https://img.shields.io/badge/React-19-blue?logo=react)
-![Tauri v2](https://img.shields.io/badge/Tauri-v2-%2324C8D8?logo=tauri)
-![Rust Edition 2021](https://img.shields.io/badge/Rust-2021-%23000000?logo=rust)<br>
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/Achilng/floral-notepaper)
+## 相比原版的主要变化
 
-</div>
+- 侧栏笔记支持文件夹/分组。
+- 文件夹支持折叠、展开、重命名、删除。
+- 笔记可以拖拽移动到文件夹。
+- 侧栏支持显式开启多选模式，批量移动或删除笔记。
+- 文件夹里可以从未分类笔记中批量选择并加入当前文件夹。
+- 正文编辑区支持常规右键菜单：复制、粘贴、剪切、全选。
+- 增加关于页面和手动检查更新。
+- 更新检查改为读取 GitHub Releases 页面，避免部分网络环境下 GitHub API 403。
+- UI 对比度、默认字号、窗口边框和阴影做了增强。
+- 设置里新增界面功能字号，用于调整按钮、列表、状态栏、工具栏等小字号。
+- `.md` 文件名会跟随笔记标题，格式类似 `标题__uuid.md`，兼顾可读性和 metadata 损坏后的恢复能力。
 
-<!-- markdownlint-restore -->
+## 本地安装方式
 
----
+当前本机使用的是便携式安装：
 
-## 为什么选择花笺
-
-市面上现有的笔记或便签软件，要么功能繁重、上手门槛高，要么界面陈旧、久未更新。花笺因此而生，其特点是轻便、随呼随用，同时提供现代化的界面与舒适的编辑体验。
-
-## 功能特点
-
-- **Markdown 编辑与预览** — 支持 GitHub Flavored Markdown 语法，实时切换编辑和预览模式
-
-  ![主窗口截图](Docs/images/主窗口截图.png)
-
-- **快捷便签** — 通过托盘或全局快捷键（默认 `Ctrl+Space`）随时唤出便签窗口
-
-  ![小窗多开示例](Docs/images/小窗多开示例.gif)
-
-- **磁贴模式** — 将笔记固定在桌面某处，以便快速查阅和复制
-
-  ![磁贴示例](Docs/images/AI绘画截图.png)
-
-- **导入导出** — 支持 `.md` 文件的导入和导出
-
-## 应用场景
-
-- 当作随时可见的剪贴板，快速暂存和复制文本
-- 游戏、看视频时随手记点东西
-- 临时记录思路或灵感
-- 桌面待办清单
-
-## 下载安装
-
-前往 [GitHub Releases](https://github.com/Achilng/floral-notepaper/releases) 下载最新版本。
-
-## 从源码构建
-
-### 环境要求
-
-- [Node.js](https://nodejs.org/) 18+
-- [Rust](https://www.rust-lang.org/tools/install)
-- [Tauri CLI 2](https://tauri.app/)
-
-### 步骤
-
-```bash
-git clone https://github.com/Achilng/floral-notepaper.git
-cd floral-notepaper
-
-npm install
-
-# 开发模式
-npm run tauri dev
-
-# 构建发布版本
-npm run tauri build
+```text
+C:\Tools\花笺\floral-notepaper.exe
 ```
 
-构建产物输出到 `src-tauri/target/release/bundle/`。
+笔记数据仍然保存在用户文档目录下，不和程序目录混放。
 
-## Star History
+## 开发与构建
 
-[![Star History Chart](https://api.star-history.com/svg?repos=Achilng/floral-notepaper&type=Date&legend=top-left)](https://star-history.com/#Achilng/floral-notepaper&Date)
+需要：
 
-## 🌟 贡献者
+- Node.js
+- Rust
+- Tauri 2
 
-[![contrib.rocks](https://contrib.rocks/image?repo=Achilng/floral-notepaper&max=1000)](https://contrib.rocks/image?repo=Achilng/floral-notepaper&max=1000)
+常用命令：
 
-## 许可证
+```powershell
+npm install
+npm test
+npm run build
+cargo test --manifest-path src-tauri\Cargo.toml
+npx tauri build --no-bundle
+```
 
-[MIT](LICENSE)
+构建出的主程序在：
+
+```text
+src-tauri\target\release\floral-notepaper.exe
+```
+
+## 与官方同步
+
+本仓库保留官方远端为 `upstream`：
+
+```powershell
+git remote -v
+```
+
+以后官方更新时，可以在本地分支上拉取并合并官方改动，再重新构建。仓库里也保留了辅助脚本：
+
+```powershell
+.\tools\update-from-official.ps1
+```
+
+## 致谢
+
+感谢原项目作者 [Achilng](https://github.com/Achilng) 开源 [floral-notepaper](https://github.com/Achilng/floral-notepaper)。本项目只是基于原项目做的个人需求增强。
+
+## License
+
+MIT License。详见 [LICENSE](LICENSE)。
