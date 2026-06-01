@@ -322,6 +322,7 @@ export function MainWindow({
   const contentRef = useRef<HTMLTextAreaElement>(null);
   const externalFileMtimeRef = useRef<number>(0);
   const lastExternalSaveRef = useRef<number>(0);
+  const ignoreNextNotesChangedRef = useRef(false);
   const saveStateRef = useRef(saveState);
   saveStateRef.current = saveState;
   const selectedIdRef = useRef(selectedId);
@@ -580,6 +581,10 @@ export function MainWindow({
 
   useEffect(() => {
     const unlisten = listen("notes-changed", () => {
+      if (ignoreNextNotesChangedRef.current) {
+        ignoreNextNotesChangedRef.current = false;
+        return;
+      }
       void refreshNotes().then((loaded) => {
         const currentId = selectedIdRef.current;
         if (!currentId) return;
@@ -810,11 +815,17 @@ export function MainWindow({
       await saveCurrentNote();
     }
     try {
+      ignoreNextNotesChangedRef.current = true;
       const note = await createNote({ title: "", content: "", category: activeCategory });
       replaceNoteMetadata(note);
       applyNote(note);
     } catch (error) {
+      ignoreNextNotesChangedRef.current = false;
       setErrorMessage(getErrorMessage(error));
+    } finally {
+      window.setTimeout(() => {
+        ignoreNextNotesChangedRef.current = false;
+      }, 500);
     }
   };
 
@@ -907,13 +918,22 @@ export function MainWindow({
         if (!saved) return;
       }
 
+      ignoreNextNotesChangedRef.current = true;
       const note = await importMarkdownNote(activeCategory);
-      if (!note) return;
+      if (!note) {
+        ignoreNextNotesChangedRef.current = false;
+        return;
+      }
 
       replaceNoteMetadata(note);
       applyNote(note);
     } catch (error) {
+      ignoreNextNotesChangedRef.current = false;
       setErrorMessage(getErrorMessage(error));
+    } finally {
+      window.setTimeout(() => {
+        ignoreNextNotesChangedRef.current = false;
+      }, 500);
     }
   };
 
