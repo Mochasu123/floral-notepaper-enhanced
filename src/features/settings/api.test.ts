@@ -43,11 +43,14 @@ describe("settings api", () => {
       fontSize: 14,
       surfaceFontSize: 14,
       uiFontSize: 12,
+      tabIndentSize: 2,
       externalFileAutoSave: true,
       rememberSurfaceSize: true,
       tileCtrlClose: true,
       toggleVisibilityShortcut: "",
       tileRenderMarkdown: false,
+      renderHtmlMarkdown: false,
+      openAtCursor: true,
     };
     mockedInvoke.mockResolvedValue(config);
 
@@ -72,11 +75,14 @@ describe("settings api", () => {
       fontSize: 16,
       surfaceFontSize: 16,
       uiFontSize: 13,
+      tabIndentSize: 4,
       externalFileAutoSave: true,
       rememberSurfaceSize: true,
       tileCtrlClose: true,
       toggleVisibilityShortcut: "",
       tileRenderMarkdown: false,
+      renderHtmlMarkdown: false,
+      openAtCursor: true,
     };
     mockedInvoke.mockResolvedValue(config);
 

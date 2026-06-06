@@ -1,5 +1,6 @@
 import chroma from "chroma-js";
 import type { CSSProperties, HTMLAttributes } from "react";
+import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { DEFAULT_TILE_COLOR, normalizeTileColor } from "../features/settings/tileColor";
 import { MarkdownPreview } from "../features/markdown/MarkdownPreview";
@@ -15,6 +16,7 @@ export interface TileProps extends Omit<
   rotation?: number;
   fontSize?: number;
   renderMarkdown?: boolean;
+  imageBaseDir?: string;
 }
 
 const MARK_SIZE = 8;
@@ -74,6 +76,7 @@ export function Tile({
   rotation = 0,
   fontSize = 16,
   renderMarkdown = false,
+  imageBaseDir,
   className = "",
   style,
   children,
@@ -81,13 +84,17 @@ export function Tile({
 }: TileProps) {
   const { t } = useTranslation();
   const tileColor = normalizeTileColor(color);
-  const isLightBg = chroma(tileColor).luminance() > 0.18;
-  const mixTarget = isLightBg ? "#1a1a18" : "#ffffff";
-  const borderColor = chroma.mix(tileColor, mixTarget, 0.18).alpha(0.55).css();
-  const cornerColor = chroma.mix(tileColor, mixTarget, 0.3).alpha(0.26).css();
-  const titleColor = chroma.mix(tileColor, mixTarget, 0.4).alpha(0.5).css();
-  const contentColor = chroma.mix(tileColor, mixTarget, 0.65).alpha(0.85).css();
-  const emptyColor = chroma.mix(tileColor, mixTarget, 0.25).alpha(0.4).css();
+  const { borderColor, cornerColor, titleColor, contentColor, emptyColor } = useMemo(() => {
+    const isLightBg = chroma(tileColor).luminance() > 0.18;
+    const mixTarget = isLightBg ? "#1a1a18" : "#ffffff";
+    return {
+      borderColor: chroma.mix(tileColor, mixTarget, 0.18).alpha(0.55).css(),
+      cornerColor: chroma.mix(tileColor, mixTarget, 0.3).alpha(0.26).css(),
+      titleColor: chroma.mix(tileColor, mixTarget, 0.4).alpha(0.5).css(),
+      contentColor: chroma.mix(tileColor, mixTarget, 0.65).alpha(0.85).css(),
+      emptyColor: chroma.mix(tileColor, mixTarget, 0.25).alpha(0.4).css(),
+    };
+  }, [tileColor]);
   const mergedStyle: CSSProperties = {
     width,
     backgroundColor: tileColor,
@@ -115,7 +122,12 @@ export function Tile({
         {content ? (
           renderMarkdown ? (
             <div style={{ color: contentColor }}>
-              <MarkdownPreview content={content} fontSize={fontSize} />
+              <MarkdownPreview
+                content={content}
+                fontSize={fontSize}
+                renderHtml={false}
+                imageBaseDir={imageBaseDir}
+              />
             </div>
           ) : (
             <div

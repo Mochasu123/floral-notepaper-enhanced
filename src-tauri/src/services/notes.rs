@@ -20,7 +20,7 @@ const LEGACY_MACOS_GLOBAL_SHORTCUTS: [&str; 5] = [
 #[cfg(target_os = "macos")]
 const MACOS_SHORTCUT_MIGRATION_MARKER: &str = ".macos-shortcut-default-v3";
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AppConfig {
     #[serde(default = "default_locale")]
@@ -46,20 +46,40 @@ pub struct AppConfig {
     pub surface_font_size: u32,
     #[serde(default = "default_ui_font_size")]
     pub ui_font_size: u32,
+    #[serde(default = "default_tab_indent_size")]
+    pub tab_indent_size: u32,
     #[serde(default = "default_external_file_auto_save")]
     pub external_file_auto_save: bool,
+    #[serde(default)]
+    pub background_image_path: String,
+    #[serde(default = "default_background_fit")]
+    pub background_fit: String,
+    #[serde(default = "default_background_dim")]
+    pub background_dim: f64,
+    #[serde(default = "default_background_blur")]
+    pub background_blur: f64,
+    #[serde(default = "default_background_scale")]
+    pub background_scale: f64,
+    #[serde(default = "default_background_position")]
+    pub background_position_x: f64,
+    #[serde(default = "default_background_position")]
+    pub background_position_y: f64,
     #[serde(default = "default_remember_surface_size")]
     pub remember_surface_size: bool,
     #[serde(default = "default_tile_ctrl_close")]
     pub tile_ctrl_close: bool,
     #[serde(default)]
     pub tile_render_markdown: bool,
+    #[serde(default)]
+    pub render_html_markdown: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub surface_width: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub surface_height: Option<u32>,
     #[serde(default = "default_toggle_visibility_shortcut")]
     pub toggle_visibility_shortcut: String,
+    #[serde(default = "default_open_at_cursor")]
+    pub open_at_cursor: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -323,6 +343,7 @@ impl NoteStore {
     pub fn save_config(&self, mut config: AppConfig) -> Result<AppConfig, AppError> {
         self.ensure_base_dir()?;
         config.notes_dir = ensure_notes_suffix(&config.notes_dir);
+        config.tab_indent_size = config.tab_indent_size.clamp(1, 8);
         is_safe_notes_dir(Path::new(&config.notes_dir))?;
         fs::create_dir_all(&config.notes_dir)?;
         write_json_atomic(&self.config_path(), &config)?;
@@ -362,11 +383,9 @@ impl NoteStore {
         self.ensure_storage()?;
         let id = Uuid::new_v4().to_string();
         let now = Utc::now();
-        let mut metadata_file = self.load_metadata()?;
-        let category = request.category.clone();
-        let file_name =
-            self.unique_file_name_for(&id, &request.title, &category, &metadata_file.notes);
+        let file_name = self.file_name_for(&id, &request.title);
         let word_count = count_words(&request.content);
+        let category = request.category.clone();
         let note_path = self.note_path_in_category(&file_name, &category);
         if let Some(parent) = note_path.parent() {
             fs::create_dir_all(parent)?;
@@ -383,6 +402,7 @@ impl NoteStore {
         };
 
         fs::write(&note_path, &request.content)?;
+        let mut metadata_file = self.load_metadata()?;
         metadata_file.notes.push(metadata.clone());
         self.save_metadata(&metadata_file)?;
 
@@ -401,16 +421,16 @@ impl NoteStore {
     pub fn update_note(&self, id: &str, request: SaveNoteRequest) -> Result<Note, AppError> {
         self.ensure_storage()?;
         let mut metadata_file = self.load_metadata()?;
-        let note_index = metadata_file
+        let note = metadata_file
             .notes
-            .iter()
-            .position(|note| note.id == id)
+            .iter_mut()
+            .find(|note| note.id == id)
             .ok_or_else(|| AppError::note_not_found(id))?;
-        let old_note = metadata_file.notes[note_index].clone();
 
+        let old_file_name = note.file_name.clone();
+        let old_category = note.category.clone();
+        let new_file_name = self.file_name_for(id, &request.title);
         let new_category = request.category.clone();
-        let new_file_name =
-            self.unique_file_name_for(id, &request.title, &new_category, &metadata_file.notes);
         let now = Utc::now();
         let word_count = count_words(&request.content);
 
@@ -420,15 +440,14 @@ impl NoteStore {
         }
         fs::write(&new_path, &request.content)?;
 
-        if old_note.file_name != new_file_name || old_note.category != new_category {
-            let old_path = self.note_path_in_category(&old_note.file_name, &old_note.category);
+        if old_file_name != new_file_name || old_category != new_category {
+            let old_path = self.note_path_in_category(&old_file_name, &old_category);
             if old_path.exists() && old_path != new_path {
                 trash::delete(&old_path)
                     .map_err(|e| AppError::new("trash", format!("移入回收站失败: {e}")))?;
             }
         }
 
-        let note = &mut metadata_file.notes[note_index];
         note.title = request.title;
         note.file_name = new_file_name.clone();
         note.category = new_category.clone();
@@ -465,7 +484,83 @@ impl NoteStore {
             trash::delete(&path)
                 .map_err(|e| AppError::new("trash", format!("移入回收站失败: {e}")))?;
         }
-        self.save_metadata(&metadata_file)
+        self.save_metadata(&metadata_file)?;
+        let _ = self.delete_note_images(id);
+        Ok(())
+    }
+
+    pub fn images_dir(&self, note_id: &str) -> PathBuf {
+        self.base_dir.join("images").join(note_id)
+    }
+
+    pub fn save_image(
+        &self,
+        note_id: &str,
+        data: &[u8],
+        extension: &str,
+    ) -> Result<String, AppError> {
+        self.ensure_storage()?;
+        self.find_metadata(note_id)?;
+
+        const ALLOWED_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"];
+        let ext = extension.to_ascii_lowercase();
+        if !ALLOWED_EXTENSIONS.contains(&ext.as_str()) {
+            return Err(AppError::new(
+                "unsupportedImageFormat",
+                format!("不支持的图片格式: {ext}"),
+            ));
+        }
+
+        let dir = self.images_dir(note_id);
+        fs::create_dir_all(&dir)?;
+
+        let file_name = format!("{}.{}", Uuid::new_v4(), ext);
+        fs::write(dir.join(&file_name), data)?;
+
+        Ok(format!("images/{note_id}/{file_name}"))
+    }
+
+    pub fn delete_note_images(&self, note_id: &str) -> Result<(), AppError> {
+        let dir = self.images_dir(note_id);
+        if dir.exists() {
+            fs::remove_dir_all(&dir)?;
+        }
+        Ok(())
+    }
+
+    pub fn clean_unused_images(
+        &self,
+        note_id: &str,
+        content: &str,
+    ) -> Result<Vec<String>, AppError> {
+        let dir = self.images_dir(note_id);
+        if !dir.exists() {
+            return Ok(Vec::new());
+        }
+
+        let mut removed = Vec::new();
+        let mut remaining = 0usize;
+        for entry in fs::read_dir(&dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let file_name = entry.file_name().to_string_lossy().to_string();
+            let relative = format!("images/{note_id}/{file_name}");
+            if !content.contains(&relative) {
+                fs::remove_file(&path)?;
+                removed.push(file_name);
+            } else {
+                remaining += 1;
+            }
+        }
+
+        if remaining == 0 {
+            let _ = fs::remove_dir(&dir);
+        }
+
+        Ok(removed)
     }
 
     pub fn import_markdown_file(&self, path: &Path, category: &str) -> Result<Note, AppError> {
@@ -614,22 +709,19 @@ impl NoteStore {
     ) -> Result<NoteMetadata, AppError> {
         self.ensure_storage()?;
         let mut metadata_file = self.load_metadata()?;
-        let note_index = metadata_file
+        let note = metadata_file
             .notes
-            .iter()
-            .position(|note| note.id == id)
+            .iter_mut()
+            .find(|note| note.id == id)
             .ok_or_else(|| AppError::note_not_found(id))?;
-        let current_note = metadata_file.notes[note_index].clone();
 
-        let old_category = current_note.category.clone();
+        let old_category = note.category.clone();
         if old_category == new_category {
-            return Ok(current_note);
+            return Ok(note.clone());
         }
 
-        let new_file_name =
-            self.unique_file_name_for(id, &current_note.title, new_category, &metadata_file.notes);
-        let old_path = self.note_path_in_category(&current_note.file_name, &old_category);
-        let new_path = self.note_path_in_category(&new_file_name, new_category);
+        let old_path = self.note_path_in_category(&note.file_name, &old_category);
+        let new_path = self.note_path_in_category(&note.file_name, new_category);
         if let Some(parent) = new_path.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -637,8 +729,6 @@ impl NoteStore {
             fs::rename(&old_path, &new_path)?;
         }
 
-        let note = &mut metadata_file.notes[note_index];
-        note.file_name = new_file_name;
         note.category = new_category.to_string();
         let result = note.clone();
         self.save_metadata(&metadata_file)?;
@@ -664,13 +754,23 @@ impl NoteStore {
             font_size: default_font_size(),
             surface_font_size: default_surface_font_size(),
             ui_font_size: default_ui_font_size(),
+            tab_indent_size: default_tab_indent_size(),
             external_file_auto_save: default_external_file_auto_save(),
+            background_image_path: String::new(),
+            background_fit: default_background_fit(),
+            background_dim: default_background_dim(),
+            background_blur: default_background_blur(),
+            background_scale: default_background_scale(),
+            background_position_x: default_background_position(),
+            background_position_y: default_background_position(),
             remember_surface_size: default_remember_surface_size(),
             tile_ctrl_close: default_tile_ctrl_close(),
             tile_render_markdown: false,
+            render_html_markdown: false,
             surface_width: None,
             surface_height: None,
             toggle_visibility_shortcut: default_toggle_visibility_shortcut(),
+            open_at_cursor: default_open_at_cursor(),
         }
     }
 
@@ -746,42 +846,13 @@ impl NoteStore {
             .ok_or_else(|| AppError::note_not_found(id))
     }
 
-    fn unique_file_name_for(
-        &self,
-        id: &str,
-        title: &str,
-        category: &str,
-        notes: &[NoteMetadata],
-    ) -> String {
+    fn file_name_for(&self, id: &str, title: &str) -> String {
         let safe_title = safe_file_stem(title);
-        let base = if safe_title.is_empty() {
-            id.to_string()
+        if safe_title.is_empty() {
+            format!("{id}.md")
         } else {
-            format!("{safe_title}__{id}")
-        };
-
-        for index in 0..1000 {
-            let file_name = if index == 0 {
-                format!("{base}.md")
-            } else {
-                format!("{base}-{}.md", index + 1)
-            };
-            let used_by_other_note = notes.iter().any(|note| {
-                note.id != id && note.category == category && note.file_name == file_name
-            });
-            let used_by_this_note = notes.iter().any(|note| {
-                note.id == id && note.category == category && note.file_name == file_name
-            });
-            let path = self.note_path_in_category(&file_name, category);
-            if used_by_this_note {
-                return file_name;
-            }
-            if !used_by_other_note && !path.exists() {
-                return file_name;
-            }
+            format!("{id}_{safe_title}.md")
         }
-
-        format!("{id}.md")
     }
 
     fn load_metadata(&self) -> Result<MetadataFile, AppError> {
@@ -879,10 +950,7 @@ fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), AppErro
     }
     let temp_path = path.with_extension("json.tmp");
     fs::write(&temp_path, serde_json::to_string_pretty(value)?)?;
-    if path.exists() {
-        fs::remove_file(path)?;
-    }
-    fs::rename(temp_path, path)?;
+    fs::rename(&temp_path, path)?;
     Ok(())
 }
 
@@ -942,11 +1010,6 @@ fn preview(content: &str) -> String {
 
 fn id_from_file_name(file_name: &str) -> Option<String> {
     let stem = file_name.strip_suffix(".md")?;
-    if let Some((_, id)) = stem.rsplit_once("__") {
-        if looks_like_uuid(id) {
-            return Some(id.to_string());
-        }
-    }
     Some(
         stem.split_once('_')
             .map(|(id, _)| id.to_string())
@@ -964,22 +1027,9 @@ fn infer_title(file_name: &str, content: &str) -> String {
     }
 
     let stem = file_name.strip_suffix(".md").unwrap_or(file_name);
-    if let Some((title, id)) = stem.rsplit_once("__") {
-        if looks_like_uuid(id) {
-            return title.replace('_', " ");
-        }
-    }
-    if let Some((_, title)) = stem.split_once('_') {
-        title.replace('_', " ")
-    } else if looks_like_uuid(stem) {
-        String::new()
-    } else {
-        stem.replace('_', " ")
-    }
-}
-
-fn looks_like_uuid(value: &str) -> bool {
-    value.len() == 36 && value.chars().all(|ch| ch == '-' || ch.is_ascii_hexdigit())
+    stem.split_once('_')
+        .map(|(_, title)| title.replace('_', " "))
+        .unwrap_or_default()
 }
 
 fn is_markdown_path(path: &Path) -> bool {
@@ -1017,10 +1067,6 @@ fn default_note_surface_auto_save() -> bool {
     true
 }
 
-fn default_ui_font_size() -> u32 {
-    12
-}
-
 fn default_tile_color() -> String {
     "#f6f3ec".into()
 }
@@ -1041,8 +1087,36 @@ fn default_surface_font_size() -> u32 {
     16
 }
 
+fn default_ui_font_size() -> u32 {
+    12
+}
+
+fn default_tab_indent_size() -> u32 {
+    2
+}
+
 fn default_external_file_auto_save() -> bool {
     true
+}
+
+fn default_background_fit() -> String {
+    "cover".into()
+}
+
+fn default_background_dim() -> f64 {
+    0.25
+}
+
+fn default_background_blur() -> f64 {
+    0.0
+}
+
+fn default_background_scale() -> f64 {
+    1.0
+}
+
+fn default_background_position() -> f64 {
+    50.0
 }
 
 fn default_remember_surface_size() -> bool {
@@ -1055,6 +1129,10 @@ fn default_tile_ctrl_close() -> bool {
 
 fn default_toggle_visibility_shortcut() -> String {
     String::new()
+}
+
+fn default_open_at_cursor() -> bool {
+    true
 }
 
 fn default_locale() -> String {
@@ -1194,13 +1272,23 @@ mod tests {
             font_size: 16,
             surface_font_size: 16,
             ui_font_size: 12,
+            tab_indent_size: 2,
             external_file_auto_save: true,
+            background_image_path: String::new(),
+            background_fit: "cover".into(),
+            background_dim: 0.25,
+            background_blur: 0.0,
+            background_scale: 1.0,
+            background_position_x: 50.0,
+            background_position_y: 50.0,
             remember_surface_size: true,
             tile_ctrl_close: true,
             tile_render_markdown: false,
+            render_html_markdown: false,
             surface_width: None,
             surface_height: None,
             toggle_visibility_shortcut: String::new(),
+            open_at_cursor: true,
         };
 
         store.save_config(saved.clone()).expect("save config");

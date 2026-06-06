@@ -35,16 +35,26 @@
     "categoryNotFound": "分类「{{category}}」不存在",
     "desktopConfig": "桌面配置更新失败",
     "duplicateShortcut": "显示/隐藏窗口快捷键不能与呼出小窗快捷键重复",
+    "imagePasteFailed": "图片粘贴失败",
+    "imageTooLarge": "图片文件过大（上限 20 MB）",
     "noPool": "便签窗口池尚未初始化",
     "noteNotFound": "找不到该笔记",
     "unsupportedFile": "只支持导入 .md 文件",
+    "unsupportedImageFormat": "不支持的图片格式",
     "unsupportedShortcut": "{{field}} 配置无效",
     "unsupportedShortcutGeneric": "快捷键配置无效"
   },
   "markdown": {
     "copied": "已复制",
     "copy": "复制",
-    "emptyHint": "预览区会显示当前笔记内容"
+    "emptyHint": "预览区会显示当前笔记内容",
+    "alert": {
+      "note": "备注",
+      "tip": "提示",
+      "important": "重要",
+      "warning": "警告",
+      "caution": "注意"
+    }
   },
   "main": {
     "category": {
@@ -67,7 +77,9 @@
       "pinToTile": "钉为磁贴",
       "previewLabel": "预览",
       "undo": "撤销（Ctrl+Z）",
-      "undoLabel": "撤销"
+      "undoLabel": "撤销",
+      "redo": "重做（Ctrl+Y）",
+      "redoLabel": "重做"
     },
     "externalFile": {
       "label": "外部文件 · {{path}}"
@@ -93,6 +105,11 @@
       "importMarkdown": "导入 Markdown",
       "newNote": "新建笔记",
       "searchPlaceholder": "搜索笔记…"
+    },
+    "images": {
+      "cleanUnused": "清理未使用图片",
+      "cleaned": "已清理 {{count}} 张图片",
+      "cleanedNone": "没有需要清理的图片"
     },
     "statusBar": {
       "byteSize": "{{size}} KB",
@@ -192,12 +209,27 @@
       "zhHK": "繁體中文"
     },
     "notesDir": "笔记目录",
+    "openAtCursor": "快捷键打开时跟随鼠标位置",
     "quickNoteShortcut": "快捷记录快捷键",
     "rememberSurfaceSize": "记住小窗尺寸",
+    "tabIndentSize": "Tab 缩进宽度",
     "selectFolder": "选择文件夹",
     "shortcut": {
       "cancelHint": "Esc 取消",
+      "checkFailed": "快捷键检测失败",
+      "checking": "正在检测快捷键...",
+      "cleared": "快捷键已清空",
       "clickToRecord": "点击录制",
+      "conflict": {
+        "current": "快捷键 {{shortcut}} 当前正在使用",
+        "invalid": "快捷键 {{shortcut}} 不受支持",
+        "none": "快捷键 {{shortcut}} 未检测到冲突",
+        "registered": "快捷键 {{shortcut}} 可能已被系统或其他应用占用",
+        "system": "快捷键 {{shortcut}} 与系统快捷键冲突",
+        "unknown": "检测完成，但释放临时快捷键失败"
+      },
+      "forQuickNote": "用于打开快捷记录小窗",
+      "needsModifier": "快捷键需要包含 Ctrl、Option/Alt 或 Command/Meta",
       "notSet": "未设置",
       "pressHint": "按下快捷键；按 Delete 清空。"
     },
@@ -214,8 +246,25 @@
     },
     "tileCtrlClose": "Ctrl+右键快速关闭磁贴",
     "tileRenderMarkdown": "磁贴渲染 Markdown",
+    "renderHtmlMarkdown": "允许 HTML 标签渲染",
     "title": "应用设置",
-    "visibilityShortcut": "显示/隐藏窗口快捷键"
+    "visibilityShortcut": "显示/隐藏窗口快捷键",
+    "background": {
+      "label": "背景图片",
+      "default": "默认背景",
+      "choose": "选择",
+      "clear": "清除背景图片",
+      "dim": "遮罩",
+      "scale": "缩放",
+      "positionX": "横向",
+      "positionY": "纵向",
+      "blur": "模糊",
+      "fit": {
+        "cover": "填充",
+        "contain": "完整",
+        "repeat": "平铺"
+      }
+    }
   },
   "tile": {
     "empty": "空"

@@ -2,22 +2,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { MouseEvent } from "react";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  createCategory,
-  createNote,
-  getErrorMessage,
-  getNote,
-  listCategories,
-  listNotes,
-  moveNoteCategory,
-  updateNote,
-} from "../features/notes/api";
+import { createNote, getErrorMessage, getNote, listNotes, updateNote } from "../features/notes/api";
+import { useImagePaste } from "../features/images/useImagePaste";
+import { useImageBaseDir } from "../features/images/useImageBaseDir";
 import type { Note, NoteMetadata } from "../features/notes/types";
 import {
   countNoteChars,
   formatShortDate,
   getDisplayTitle,
-  groupNotesByCategory,
   metadataFromNote,
 } from "../features/notes/noteUtils";
 import { listen } from "@tauri-apps/api/event";
@@ -129,11 +121,6 @@ export function NotePad({
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [hoveredNote, setHoveredNote] = useState<string | null>(null);
-  const [categories, setCategories] = useState<string[]>([]);
-  const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
-  const [dragOverCategory, setDragOverCategory] = useState<string | null>(null);
-  const [showCategoryInput, setShowCategoryInput] = useState(false);
-  const [categoryInputValue, setCategoryInputValue] = useState("");
   const [status, setStatus] = useState<NotePadStatus>("empty");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [noteSurfaceAutoSave, setNoteSurfaceAutoSave] = useState(initialAutoSave);
@@ -171,15 +158,10 @@ export function NotePad({
     }),
     [t],
   );
-  const categoryGroups = useMemo(
-    () => groupNotesByCategory(notes, categories),
-    [categories, notes],
-  );
 
   const refreshNotes = useCallback(async () => {
-    const [loadedNotes, loadedCategories] = await Promise.all([listNotes(), listCategories()]);
+    const loadedNotes = await listNotes();
     setNotes(loadedNotes);
-    setCategories(loadedCategories);
     return loadedNotes;
   }, []);
 
@@ -338,6 +320,32 @@ export function NotePad({
     [content, editingNoteId, title],
   );
 
+  const imageBaseDir = useImageBaseDir();
+
+  const ensureNoteSaved = useCallback(async (): Promise<string | null> => {
+    if (editingNoteId) return editingNoteId;
+    try {
+      const note = await saveNote();
+      return note.id;
+    } catch {
+      return null;
+    }
+  }, [editingNoteId, saveNote]);
+
+  const {
+    handlePaste: imagePasteHandler,
+    handleDrop: imageDropHandler,
+    handleDragOver: imageDragOverHandler,
+  } = useImagePaste({
+    noteId: editingNoteId,
+    textareaRef: contentRef,
+    setContent,
+    markDirty: () => setStatus("dirty"),
+    onEnsureNoteSaved: ensureNoteSaved,
+    onError: setErrorMessage,
+    t,
+  });
+
   const tileNoteId = editingNoteId ?? initialNoteId ?? "";
 
   const switchSurfaceMode = useCallback(
@@ -401,55 +409,6 @@ export function NotePad({
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [handleSave]);
-
-  const toggleCategoryCollapse = (category: string) => {
-    setCollapsedCategories((current) => {
-      const next = new Set(current);
-      if (next.has(category)) {
-        next.delete(category);
-      } else {
-        next.add(category);
-      }
-      return next;
-    });
-  };
-
-  const handleCreateCategory = async () => {
-    const name = categoryInputValue.trim();
-    if (!name) {
-      setShowCategoryInput(false);
-      return;
-    }
-
-    setErrorMessage(null);
-    try {
-      await createCategory(name);
-      setCategories((current) => [...new Set([...current, name])].sort());
-      setCategoryInputValue("");
-      setShowCategoryInput(false);
-      setCollapsedCategories((current) => {
-        const next = new Set(current);
-        next.delete(name);
-        return next;
-      });
-    } catch (error) {
-      setErrorMessage(getErrorMessage(error));
-    }
-  };
-
-  const handleMoveNote = async (noteId: string, category: string) => {
-    setErrorMessage(null);
-    try {
-      const moved = await moveNoteCategory(noteId, category);
-      setNotes((current) =>
-        current
-          .map((note) => (note.id === moved.id ? moved : note))
-          .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)),
-      );
-    } catch (error) {
-      setErrorMessage(getErrorMessage(error));
-    }
-  };
 
   const handleOpenNote = async (noteId: string) => {
     setErrorMessage(null);
@@ -559,7 +518,7 @@ export function NotePad({
   const enterClass = hasEnteredOnce.current ? "" : "animate-window-enter";
   const surfaceWrapperClassName = `w-full h-screen flex flex-col bg-transparent p-0 ${isExiting ? "animate-window-exit" : enterClass}`;
   const padSurfaceClassName =
-    "app-surface-frame relative noise-bg w-full h-full min-h-0 bg-cloud overflow-hidden flex flex-col flex-1 border-2 border-paper-deep shadow-[0_12px_34px_rgba(26,26,24,0.18)] transition-all duration-200 ease-out";
+    "app-surface-frame relative noise-bg w-full h-full min-h-0 bg-cloud overflow-hidden flex flex-col flex-1 border border-paper-deep/70 shadow-[0_1px_10px_rgba(26,26,24,0.06)] transition-all duration-200 ease-out";
 
   return (
     <div className={surfaceWrapperClassName}>
@@ -570,6 +529,7 @@ export function NotePad({
           color={tileColor}
           fontSize={surfaceFontSize}
           renderMarkdown={!errorMessage && tileRenderMarkdown}
+          imageBaseDir={imageBaseDir ?? undefined}
           width="100%"
           className="h-full cursor-default"
           data-surface-mode={surfaceMode}
@@ -704,11 +664,15 @@ export function NotePad({
 
                 <textarea
                   ref={contentRef}
+                  data-tab-indent="true"
                   value={content}
                   onChange={(event) => {
                     setContent(event.target.value);
                     setStatus("dirty");
                   }}
+                  onPaste={imagePasteHandler}
+                  onDrop={imageDropHandler}
+                  onDragOver={imageDragOverHandler}
                   onKeyDown={(event) => {
                     if (event.key === "ArrowUp") {
                       const ta = contentRef.current;
@@ -723,7 +687,7 @@ export function NotePad({
                   }}
                   placeholder={t("notepad.placeholder.content", { defaultValue: "写点什么……" })}
                   className="w-full flex-1 min-h-0 pb-2 leading-relaxed text-ink-soft font-body placeholder:text-ink-ghost/50"
-                  style={{ fontSize: `${surfaceFontSize}px` }}
+                  style={{ fontSize: `${surfaceFontSize}px`, tabSize: `var(--tab-indent-size, 2)` }}
                 />
 
                 <div className="flex items-center justify-between mt-auto pt-2 border-t border-paper-deep/30 shrink-0">
@@ -749,197 +713,58 @@ export function NotePad({
               </div>
             ) : (
               <div className="p-2 flex-1 min-h-0 overflow-y-auto">
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between px-2 pb-1">
-                    <span className="text-[11px] text-ink-faint">
-                      {t("notepad.category.title", { defaultValue: "分组" })}
-                    </span>
+                <div className="space-y-0.5">
+                  {notes.map((note) => (
                     <button
-                      type="button"
-                      onClick={() => setShowCategoryInput(true)}
-                      className="h-6 px-2 rounded-md text-[11px] text-ink-faint hover:text-bamboo hover:bg-bamboo-mist/50 transition-colors cursor-pointer"
+                      key={note.id}
+                      onClick={() => void handleOpenNote(note.id)}
+                      onMouseEnter={() => setHoveredNote(note.id)}
+                      onMouseLeave={() => setHoveredNote(null)}
+                      className="w-full text-left px-3.5 py-3 rounded-xl transition-all duration-200 cursor-pointer group hover:bg-paper-warm/70"
                     >
-                      {t("notepad.category.new", { defaultValue: "新建" })}
-                    </button>
-                  </div>
-
-                  {showCategoryInput && (
-                    <div className="px-2 pb-1 flex items-center gap-1.5">
-                      <input
-                        type="text"
-                        autoFocus
-                        value={categoryInputValue}
-                        onChange={(event) => setCategoryInputValue(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter") void handleCreateCategory();
-                          if (event.key === "Escape") {
-                            setShowCategoryInput(false);
-                            setCategoryInputValue("");
-                          }
-                        }}
-                        onBlur={() => void handleCreateCategory()}
-                        placeholder={t("notepad.category.placeholder", {
-                          defaultValue: "输入组名...",
-                        })}
-                        className="min-w-0 flex-1 h-7 px-2 rounded-md bg-paper-warm/70 border border-paper-deep/45 text-[12px] text-ink-soft"
-                      />
-                    </div>
-                  )}
-
-                  {categoryGroups.map((group) => {
-                    const category = group.category;
-                    const isUncategorized = category === "";
-                    const isCollapsed = !isUncategorized && collapsedCategories.has(category);
-                    const title = isUncategorized
-                      ? t("notepad.category.uncategorized", { defaultValue: "未分组" })
-                      : category;
-
-                    return (
-                      <div
-                        key={isUncategorized ? "__uncategorized__" : category}
-                        className={`rounded-lg transition-all duration-200 ${
-                          dragOverCategory === category ? "bg-bamboo/10 ring-1 ring-bamboo/25" : ""
-                        }`}
-                        onDragOver={(event) => {
-                          event.preventDefault();
-                          event.dataTransfer.dropEffect = "move";
-                          setDragOverCategory(category);
-                        }}
-                        onDragLeave={(event) => {
-                          if (!event.currentTarget.contains(event.relatedTarget as Node)) {
-                            setDragOverCategory(null);
-                          }
-                        }}
-                        onDrop={(event) => {
-                          event.preventDefault();
-                          setDragOverCategory(null);
-                          const noteId = event.dataTransfer.getData("text/plain");
-                          if (noteId) void handleMoveNote(noteId, category);
-                        }}
-                      >
-                        {!isUncategorized && (
+                      <div className="flex items-center justify-between mb-0.5">
+                        <span className="text-[13px] font-display font-medium text-ink-soft group-hover:text-ink transition-colors truncate pr-2">
+                          {getDisplayTitle(note)}
+                        </span>
+                        <div className="flex items-center gap-1.5 shrink-0">
                           <button
-                            type="button"
-                            onClick={() => toggleCategoryCollapse(category)}
-                            className={`w-full flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-left transition-colors cursor-pointer ${
-                              isCollapsed
-                                ? "border border-bamboo/15 hover:bg-paper-warm/60"
-                                : "border border-bamboo/15 bg-bamboo/8 rounded-b-none"
-                            }`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void openNoteInEditor(note.id);
+                            }}
+                            className="w-6 h-6 flex items-center justify-center rounded-md text-ink-ghost hover:text-bamboo hover:bg-bamboo-mist/50 transition-all duration-200 opacity-0 group-hover:opacity-100 cursor-pointer"
+                            title={t("notepad.tooltip.openInEditor", {
+                              defaultValue: "在编辑器中打开",
+                            })}
                           >
                             <svg
-                              width="10"
-                              height="10"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2.5"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              className={`text-bamboo/60 shrink-0 transition-transform ${isCollapsed ? "" : "rotate-90"}`}
-                            >
-                              <polyline points="9 18 15 12 9 6" />
-                            </svg>
-                            <svg
-                              width="12"
-                              height="12"
+                              width="13"
+                              height="13"
                               viewBox="0 0 24 24"
                               fill="none"
                               stroke="currentColor"
                               strokeWidth="2"
                               strokeLinecap="round"
                               strokeLinejoin="round"
-                              className="text-bamboo/60 shrink-0"
                             >
-                              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                              <polyline points="15 3 21 3 21 9" />
+                              <line x1="10" y1="14" x2="21" y2="3" />
                             </svg>
-                            <span className="min-w-0 flex-1 text-[11px] text-bamboo/80 font-medium truncate">
-                              {title}
-                            </span>
-                            <span className="text-[9px] text-bamboo/50 font-mono">
-                              {group.notes.length}
-                            </span>
                           </button>
-                        )}
-
-                        <div className={`category-body ${isCollapsed ? "" : "expanded"}`}>
-                          <div
-                            className={`category-body-inner ${
-                              isUncategorized
-                                ? ""
-                                : "bg-bamboo/[0.03] border border-t-0 border-bamboo/10 rounded-b-lg pb-1 pt-1"
-                            }`}
-                          >
-                            {group.notes.length === 0 ? (
-                              <div className="px-3 py-3 text-center text-[11px] text-ink-ghost/60">
-                                {t("notepad.category.emptyFolder", { defaultValue: "空文件夹" })}
-                              </div>
-                            ) : (
-                              group.notes.map((note) => (
-                                <button
-                                  key={note.id}
-                                  draggable
-                                  onDragStart={(event) => {
-                                    event.dataTransfer.setData("text/plain", note.id);
-                                    event.dataTransfer.effectAllowed = "move";
-                                  }}
-                                  onClick={() => void handleOpenNote(note.id)}
-                                  onMouseEnter={() => setHoveredNote(note.id)}
-                                  onMouseLeave={() => setHoveredNote(null)}
-                                  className="w-full text-left px-3.5 py-3 rounded-xl transition-all duration-200 cursor-pointer group hover:bg-paper-warm/70"
-                                >
-                                  <div className="flex items-center justify-between mb-0.5">
-                                    <span className="text-[13px] font-display font-medium text-ink-soft group-hover:text-ink transition-colors truncate pr-2">
-                                      {getDisplayTitle(note, t)}
-                                    </span>
-                                    <div className="flex items-center gap-1.5 shrink-0">
-                                      <button
-                                        type="button"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          void openNoteInEditor(note.id);
-                                        }}
-                                        className="w-6 h-6 flex items-center justify-center rounded-md text-ink-ghost hover:text-bamboo hover:bg-bamboo-mist/50 transition-all duration-200 opacity-0 group-hover:opacity-100 cursor-pointer"
-                                        title={t("notepad.tooltip.openInEditor", {
-                                          defaultValue: "在编辑器中打开",
-                                        })}
-                                      >
-                                        <svg
-                                          width="13"
-                                          height="13"
-                                          viewBox="0 0 24 24"
-                                          fill="none"
-                                          stroke="currentColor"
-                                          strokeWidth="2"
-                                          strokeLinecap="round"
-                                          strokeLinejoin="round"
-                                        >
-                                          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                                          <polyline points="15 3 21 3 21 9" />
-                                          <line x1="10" y1="14" x2="21" y2="3" />
-                                        </svg>
-                                      </button>
-                                      <span className="text-[11px] text-ink-ghost font-mono tabular-nums">
-                                        {formatShortDate(note.updatedAt)}
-                                      </span>
-                                    </div>
-                                  </div>
-                                  <p className="text-[12px] text-ink-ghost leading-relaxed line-clamp-1 group-hover:text-ink-faint transition-colors">
-                                    {note.preview ||
-                                      t("common.blankNote", { defaultValue: "空白笔记" })}
-                                  </p>
-                                  {hoveredNote === note.id && (
-                                    <div className="mt-1.5 h-px bg-bamboo/10 transition-all duration-300" />
-                                  )}
-                                </button>
-                              ))
-                            )}
-                          </div>
+                          <span className="text-[11px] text-ink-ghost font-mono tabular-nums">
+                            {formatShortDate(note.updatedAt)}
+                          </span>
                         </div>
                       </div>
-                    );
-                  })}
-
+                      <p className="text-[12px] text-ink-ghost leading-relaxed line-clamp-1 group-hover:text-ink-faint transition-colors">
+                        {note.preview || t("common.blankNote", { defaultValue: "空白笔记" })}
+                      </p>
+                      {hoveredNote === note.id && (
+                        <div className="mt-1.5 h-px bg-bamboo/10 transition-all duration-300" />
+                      )}
+                    </button>
+                  ))}
                   {notes.length === 0 && (
                     <div className="px-4 py-8 text-center text-[12px] text-ink-ghost">
                       {t("notepad.emptyState", { defaultValue: "还没有可打开的笔记" })}

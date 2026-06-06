@@ -26,12 +26,21 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": []
+      }
     }
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg", "nsis"],
+    "targets": ["app", "dmg", "nsis", "deb", "rpm", "appimage"],
+    "linux": {
+      "appimage": {
+        "bundleMediaFramework": false
+      }
+    },
     "macOS": {
       "minimumSystemVersion": "15.0"
     },
